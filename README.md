@@ -1,0 +1,2 @@
+# primetest
+prime number tester

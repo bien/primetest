@@ -1,6 +1,7 @@
-from itertools import zip_longest
-import numpy as np
+import concurrent.futures
+from gmpy2 import mpz
 import random
+import time
 
 def sq_adj(x, adj=0):
     return x * x + adj
@@ -23,11 +24,9 @@ def div_bits(x, nbits):
 
 def sq_mod_n(x, n, adj=0):
     return just_mod(sq_adj(x, adj), n)
-#    return (x * x + adj) % n
-#    return np.mod(np.power(x, 2) + adj, n)
 
 def mul_mod_n(x, a, n):
-    return np.mod(x * a, n)
+    return (x * a) % n
 
 def powmod(a, n):
     """Compute a^n (mod n)"""
@@ -51,8 +50,8 @@ def isprime(n):
     if n <= 3:
         return True
     aa = random.choices(range(1, min(10000, n - 1)), k=5)
-    prev = powmod(np.array(aa), n)
-    return np.all(np.isin(prev, (-1, 1)))
+    prev = [powmod(a, n) for a in aa]
+    return all([p in (-1, 1) for p in prev])
 
 def lucaslehmer(p):
     # uses lucas lehmer primality test for candidate primes 2^p - 1
@@ -65,6 +64,7 @@ def lucaslehmer(p):
 
 def lucaslehmer_montgomery(p):
     # uses lucas lehmer primality test for candidate primes 2^p - 1
+    start = time.time()
     n = (1 << p) - 1
     r, rbits = next_power_2(n)
     s = Montgomery(4, r, n, rbits)
@@ -72,7 +72,7 @@ def lucaslehmer_montgomery(p):
         s.mult(s)
         s.add(-2)
 #        print(n, i, s)
-    return s.to_int() == 0
+    return s.to_int() == 0, time.time() - start
 
 def extended_gcd(a, b):
     s = 0
@@ -96,7 +96,7 @@ def from_montgomery_form(m, rprime, n):
 class Montgomery:
     def __init__(self, x, r, n, rbits=0):
         self.n = n
-        self.m = to_montgomery_form(x, r, n)
+        self.m = mpz(to_montgomery_form(x, r, n))
         self.r = r
         self.rbits = rbits
         self.rprime = extended_gcd(r, n)
@@ -124,23 +124,29 @@ class Montgomery:
             self.m += self.n
 
 def prime_candidates(k, start=2):
-    n = 2 ** (start - 1)
+    n = 1 << (start - 1)
     for i in range(start, k):
         n = n * 2
         if isprime(i):
             yield i
 
-def grouper(iterable, n, *, incomplete='fill', fillvalue=None):
-    "Collect data into non-overlapping fixed-length chunks or blocks"
-    # grouper('ABCDEFG', 3, fillvalue='x') --> ABC DEF Gxx
-    args = [iter(iterable)] * n
-    return zip_longest(*args, fillvalue=fillvalue)
+def mersennes(start, stop, use_threads=True):
+    cpu_elapsed = 0
+    start_time = time.time()
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        results = []
+        for i in prime_candidates(k, start):
+            future = executor.submit(lucaslehmer_montgomery, i)
+            results.append((i, future))
 
-def mersennes(k, start=2):
-    for i in prime_candidates(k, start):
-        q = lucaslehmer_montgomery(i)
-        if q:
-            print(f"2^{i}-1", q)
+        print("Submitted")
+
+        for i, future in results:
+            q, elapsed = future.result()
+            cpu_elapsed += elapsed
+            if q:
+                print(f"2^{i}-1", q)
+    print("Wall clock", time.time() - start_time, "cpu time", cpu_elapsed)
 
 def next_power_2(n):
     x = 1
@@ -150,16 +156,7 @@ def next_power_2(n):
         xbits += 1
     return x, xbits
 
-#print(isprime(17))
-import time
-import cProfile
-start = time.time()
-cProfile.run("mersennes(2000)", sort='cumtime')
-print("elapsed", time.time() - start)
-
-#print(to_montgomery_form(3, 100, 17))
-#n = 17
-#r = 32
-#mm = Montgomery(7, r, n)
-#mm.mult(Montgomery(15, r, n))
-#print(mm.to_int())
+if __name__ == '__main__':
+    start = time.time()
+    mersennes(30000, 31000)
+    print("elapsed", time.time() - start)

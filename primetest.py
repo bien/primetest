@@ -53,15 +53,6 @@ def isprime(n):
     prev = [powmod(a, n) for a in aa]
     return all([p in (-1, 1) for p in prev])
 
-def lucaslehmer(p):
-    # uses lucas lehmer primality test for candidate primes 2^p - 1
-    s = 4
-    n = (1 << p) - 1
-    for i in range(p - 2):
-        s = sq_mod_n(s, n, adj=-2)
-#        print(n, i, s)
-    return s == 0
-
 def lucaslehmer_montgomery(p):
     # uses lucas lehmer primality test for candidate primes 2^p - 1
     start = time.time()
@@ -120,32 +111,46 @@ class Montgomery:
         self.m += x
         if self.m >= self.n:
             self.m -= self.n
-        while self.m < 0:
+        if self.m < 0:
             self.m += self.n
 
-def prime_candidates(k, start=2):
+def prime_candidates(start, stop):
     n = 1 << (start - 1)
-    for i in range(start, k):
+    for i in range(start, stop):
         n = n * 2
         if isprime(i):
             yield i
 
+class FakeFuture:
+    def __init__(self, i):
+        self.i = i
+
+    def result(self):
+        start = time.time()
+        return lucaslehmer_montgomery(self.i)
+
 def mersennes(start, stop, use_threads=True):
     cpu_elapsed = 0
     start_time = time.time()
-    with concurrent.futures.ProcessPoolExecutor() as executor:
-        results = []
-        for i in prime_candidates(k, start):
-            future = executor.submit(lucaslehmer_montgomery, i)
+    results = []
+    if use_threads:
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            for i in prime_candidates(start, stop):
+                future = executor.submit(lucaslehmer_montgomery, i)
+                results.append((i, future))
+            print("Submitted")
+    else:
+        for i in prime_candidates(start, stop):
+            future = FakeFuture(i)
             results.append((i, future))
 
-        print("Submitted")
-
-        for i, future in results:
-            q, elapsed = future.result()
-            cpu_elapsed += elapsed
-            if q:
-                print(f"2^{i}-1", q)
+    for i, future in results:
+        q, elapsed = future.result()
+        cpu_elapsed += elapsed
+        if q:
+            print(f"2^{i}-1", q)
+        elif q % 100 == 0:
+            print(f" (i)")
     print("Wall clock", time.time() - start_time, "cpu time", cpu_elapsed)
 
 def next_power_2(n):
@@ -157,6 +162,8 @@ def next_power_2(n):
     return x, xbits
 
 if __name__ == '__main__':
+    import cProfile
     start = time.time()
-    mersennes(30000, 31000)
+    cProfile.run("mersennes(30000, 80000, use_threads=True)", sort="cumtime")
     print("elapsed", time.time() - start)
+
